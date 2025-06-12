@@ -1,34 +1,18 @@
-
-import time
-from contextlib import contextmanager
-
-import cv2
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
-# from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-# from lerobot.common.robot_devices.cameras.configs import OpenCVCameraConfig
-# from lerobot.common.robot_devices.motors.dynamixel import TorqueMode
-# from lerobot.common.robot_devices.robots.configs import So100RobotConfig
-# from lerobot.common.robot_devices.robots.utils import make_robot_from_config
-# from lerobot.common.robot_devices.utils import RobotDeviceAlreadyConnectedError
-
-# NOTE:
-# Sometimes we would like to abstract different env, or run this on a separate machine
-# User can just move this single python class method gr00t/eval/service.py
-# to their code or do the following line below
-# sys.path.append(os.path.expanduser("~/Isaac-GR00T/gr00t/eval/"))
 from gr00t.eval.service import ExternalRobotInferenceClient
+from typing import Dict, Any
 
-# Import tqdm for progress bar
-from tqdm import tqdm
+raw_obs_dict: Dict[str, Any] = {} # fill in the blanks
 
-#################################################################################
+policy = ExternalRobotInferenceClient(host="localhost", port=5555)
+
+print("Policy initialized")
+# raw_action_chunk: Dict[str, Any] = policy.get_action(raw_obs_dict)
+
 
 
 class SO100Robot:
     def __init__(self, calibrate=False, enable_camera=False, cam_idx=9):
-        # self.config = So100RobotConfig()
+        self.config = So100RobotConfig()
         self.calibrate = calibrate
         self.enable_camera = enable_camera
         self.cam_idx = cam_idx
@@ -89,72 +73,7 @@ class SO100Robot:
             self.camera.connect()
         print("================> SO100 Robot is fully connected =================")
 
-    def set_so100_robot_preset(self):
-        # Mode=0 for Position Control
-        self.motor_bus.write("Mode", 0)
-        # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
-        # self.motor_bus.write("P_Coefficient", 16)
-        self.motor_bus.write("P_Coefficient", 10)
-        # Set I_Coefficient and D_Coefficient to default value 0 and 32
-        self.motor_bus.write("I_Coefficient", 0)
-        self.motor_bus.write("D_Coefficient", 32)
-        # Close the write lock so that Maximum_Acceleration gets written to EPROM address,
-        # which is mandatory for Maximum_Acceleration to take effect after rebooting.
-        self.motor_bus.write("Lock", 0)
-        # Set Maximum_Acceleration to 254 to speedup acceleration and deceleration of
-        # the motors. Note: this configuration is not in the official STS3215 Memory Table
-        self.motor_bus.write("Maximum_Acceleration", 254)
-        self.motor_bus.write("Acceleration", 254)
 
-    def move_to_initial_pose(self):
-        current_state = self.robot.capture_observation()["observation.state"]
-        # print("current_state", current_state)
-        # print all keys of the observation
-        # print("observation keys:", self.robot.capture_observation().keys())
-        current_state = torch.tensor([90, 90, 90, 90, -70, 30])
-        self.robot.send_action(current_state)
-        time.sleep(2)
-        print("-------------------------------- moving to initial pose")
-
-    def go_home(self):
-        # [ 88.0664, 156.7090, 135.6152,  83.7598, -89.1211,  16.5107]
-        print("-------------------------------- moving to home pose")
-        home_state = torch.tensor([88.0664, 156.7090, 135.6152, 83.7598, -89.1211, 16.5107])
-        self.set_target_state(home_state)
-        time.sleep(2)
-
-    def get_observation(self):
-        return self.robot.capture_observation()
-
-    def get_current_state(self):
-        return self.get_observation()["observation.state"].data.numpy()
-
-    def get_current_img(self):
-        img = self.get_observation()["observation.images.webcam"].data.numpy()
-        # convert bgr to rgb
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        return img
-
-    def set_target_state(self, target_state: torch.Tensor):
-        self.robot.send_action(target_state)
-
-    def enable(self):
-        self.motor_bus.write("Torque_Enable", TorqueMode.ENABLED.value)
-
-    def disable(self):
-        self.motor_bus.write("Torque_Enable", TorqueMode.DISABLED.value)
-
-    def disconnect(self):
-        self.disable()
-        self.robot.disconnect()
-        self.robot.is_connected = False
-        print("================> SO100 Robot disconnected")
-
-    # def __del__(self):
-        # self.disconnect()
-
-
-#################################################################################
 
 
 class Gr00tRobotInferenceClient:
@@ -222,13 +141,13 @@ if __name__ == "__main__":
         "--use_policy", action="store_true"
     )  # default is to playback the provided dataset
     parser.add_argument("--dataset_path", type=str, default=default_dataset_path)
-    parser.add_argument("--host", type=str, default="localhost")
+    parser.add_argument("--host", type=str, default="10.110.17.183")
     parser.add_argument("--port", type=int, default=5555)
     parser.add_argument("--action_horizon", type=int, default=12)
     parser.add_argument("--actions_to_execute", type=int, default=350)
     parser.add_argument("--cam_idx", type=int, default=1)
     parser.add_argument(
-        "--lang_instruction", type=str, default="pick eraser"
+        "--lang_instruction", type=str, default="Pick up the fruits and place them on the plate."
     )
     parser.add_argument("--record_imgs", action="store_true")
     args = parser.parse_args()
@@ -241,7 +160,7 @@ if __name__ == "__main__":
     ACTION_HORIZON = (
         args.action_horizon
     )  # we will execute only some actions from the action_chunk of 16
-    MODALITY_KEYS = ["joints"]
+    MODALITY_KEYS = ["single_arm", "gripper"]
     if USE_POLICY:
         client = Gr00tRobotInferenceClient(
             host=args.host,
@@ -295,7 +214,6 @@ if __name__ == "__main__":
 
         robot = SO100Robot(calibrate=False, enable_camera=True, cam_idx=args.cam_idx)
 
-
         with robot.activate():
             print("Run replay of the dataset")
             actions = []
@@ -318,3 +236,4 @@ if __name__ == "__main__":
             print("Done all actions")
             robot.go_home()
             print("Done home")
+
