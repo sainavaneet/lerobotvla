@@ -26,15 +26,7 @@ class SO100Robot:
 
     def go_home(self):
         print("Moving to home pose...")
-        home_action = {
-            "shoulder_pan.pos": -10,
-            "shoulder_lift.pos": -(156.7090 - 90),  
-            "elbow_flex.pos": 135.6152 - 90,  
-            "wrist_flex.pos": 83.7598,
-            "wrist_roll.pos": -89.1211,
-            "gripper.pos": 16.5107
-        }
-        self.robot.send_action(home_action)
+        self.robot.send_action(self.robot.initial_pose)
         time.sleep(2)
 
 def disable_torque(robot):
