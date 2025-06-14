@@ -11,12 +11,14 @@ class DatasetGUI:
         self.root = root
         self.root.title("Dataset Script Runner")
         
-        self.root.geometry("500x450")
+        self.root.geometry("600x500")
         self.root.resizable(False, False)
         
         # Store the process ID of the running script
         self.current_process = None
         self.terminal_pid = None
+        self.timer_running = False
+        self.start_time = None
 
         main_frame = ttk.Frame(root, padding="20")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -29,11 +31,11 @@ class DatasetGUI:
         self.task_combo = ttk.Combobox(
             main_frame,
             textvariable=self.task_var,
-            values=["place", "pick", "stack", "unstack"],
+            values=["pick mint candle", "pick red candle", "pick yellow candle", "pick purple candle"],
             state="readonly"
         )
         self.task_combo.grid(row=1, column=0, pady=(0, 20), sticky=tk.W)
-        self.task_combo.set("place")  # Default value
+        self.task_combo.set("pick mint candle")  # Default value
         
         # Create resume checkbox
         self.resume_var = tk.BooleanVar(value=False)
@@ -67,13 +69,44 @@ class DatasetGUI:
         self.stop_button.grid(row=0, column=1, padx=5)
         self.stop_button.state(['disabled'])  # Initially disabled
         
+        # Create start timer button
+        self.timer_button = ttk.Button(
+            button_frame,
+            text="Start Timer",
+            command=self.start_timer_only,
+            style="Accent.TButton"
+        )
+        self.timer_button.grid(row=0, column=2, padx=5)
+        
         # Create status label
         self.status_label = ttk.Label(main_frame, text="")
         self.status_label.grid(row=4, column=0, pady=10)
 
+        # Create timer label
+        self.timer_label = ttk.Label(main_frame, text="Time: 0.0s", font=("Arial", 14, "bold"))
+        self.timer_label.grid(row=5, column=0, pady=10)
+
         # Configure style
         style = ttk.Style()
         style.configure("Accent.TButton", font=("Arial", 12))
+        
+    def start_timer_only(self):
+        """Start only the timer without running the dataset script"""
+        self.timer_running = True
+        self.start_time = time.time()
+        self.update_timer()
+        self.timer_button.state(['disabled'])  # Disable timer button while running
+        
+    def update_timer(self):
+        if self.timer_running:
+            elapsed_time = time.time() - self.start_time
+            if elapsed_time <= 8.0:  # Only show timer up to 8 seconds
+                self.timer_label.config(text=f"Time: {elapsed_time:.1f}s")
+                self.root.after(100, self.update_timer)  # Update every 100ms for smoother display
+            else:
+                self.timer_label.config(text="Time: 8.0s")
+                self.timer_running = False
+                self.timer_button.state(['!disabled'])  # Re-enable timer button when done
         
     def run_dataset_script(self):
         selected_task = self.task_var.get()
@@ -87,11 +120,11 @@ class DatasetGUI:
             # Build command with all necessary parameters
             command = (
                 f"/home/navaneet/miniconda3/envs/lerobot/bin/python -m lerobot.record "
-                f"--dataset.fps=30 "
-                f"--dataset.num_image_writer_processes=4 "
+                f"--dataset.fps=30 "   
+                f"--dataset.num_image_writer_processes=8 "
                 f"--robot.type=so101_follower "
                 f"--robot.port=/dev/tty_follower_arm "
-                f'--robot.cameras="{{ front: {{type: opencv, index_or_path: 5, width: 640, height: 480, fps: 30}}}}" '
+                f'--robot.cameras="{{"left_cam": {{"type": "opencv", "index_or_path": 0, "width": 640, "height": 480, "fps": 30}}, "right_cam": {{"type": "opencv", "index_or_path": 2, "width": 640, "height": 480, "fps": 30}}, "down_cam": {{"type": "opencv", "index_or_path": 8, "width": 640, "height": 480, "fps": 30}}}}" '
                 f"--teleop.type=so101_leader "
                 f"--teleop.port=/dev/tty_leader_arm "
                 f'--dataset.single_task="{selected_task}" '
@@ -125,6 +158,11 @@ class DatasetGUI:
             
     def stop_recording(self):
         try:
+            # Stop the timer
+            self.timer_running = False
+            self.timer_label.config(text="Time: 0.0s")
+            self.timer_button.state(['!disabled'])  # Re-enable timer button
+            
             # Send ESC key to the terminal
             subprocess.run(['xdotool', 'key', 'Escape'])
             self.status_label.config(text="Stop command sent. Waiting for encoding to complete...")
@@ -148,21 +186,14 @@ class DatasetGUI:
                         self.root.after(1000, self.monitor_process)
                         return
                     
-                    # If no children are running, close the terminal
-                    try:
-                        # Kill the gnome-terminal process
-                        subprocess.run(['pkill', '-f', 'gnome-terminal'])
-                    except:
-                        # If pkill fails, try to kill the process directly
-                        process.terminate()
-                    
-                    self.status_label.config(text="Recording stopped and terminal closed")
+                    # If no children are running, just update the UI
+                    self.status_label.config(text="Recording stopped")
                     self.run_button.state(['!disabled'])  # Enable run button
                     self.stop_button.state(['disabled'])  # Disable stop button
                     self.terminal_pid = None
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             # Process has already terminated
-            self.status_label.config(text="Recording stopped and terminal closed")
+            self.status_label.config(text="Recording stopped")
             self.run_button.state(['!disabled'])  # Enable run button
             self.stop_button.state(['disabled'])  # Disable stop button
             self.terminal_pid = None
