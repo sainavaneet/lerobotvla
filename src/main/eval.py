@@ -2,7 +2,6 @@ import time
 from contextlib import contextmanager
 import threading
 import queue
-import collections
 
 import cv2
 import matplotlib.pyplot as plt
@@ -41,10 +40,6 @@ class SO100Robot:
         self.enable_camera = enable_camera
         self.cam_main_idx = cam_main_idx
         self.robot_is_connected = False
-        
-        # Add smoothing buffer for temporal ensembling
-        self.action_buffer = collections.deque(maxlen=5)  # Store last 5 actions
-        self.smoothing_weights = np.array([0.1, 0.15, 0.2, 0.25, 0.3])  # Weights for weighted average
         
         # Initialize cameras directly with OpenCV
         if not enable_camera:
@@ -139,24 +134,14 @@ class SO100Robot:
         new_state = torch.tensor(target_state)
         print("new_state type", type(new_state))
 
-        # Add current action to buffer
-        self.action_buffer.append(new_state.numpy())
-        
-        # If buffer is not full, use current action directly
-        if len(self.action_buffer) < self.action_buffer.maxlen:
-            smoothed_state = new_state
-        else:
-            # Calculate weighted moving average
-            smoothed_state = np.average(self.action_buffer, weights=self.smoothing_weights, axis=0)
-            smoothed_state = torch.tensor(smoothed_state)
 
         state_dict = {
-            "shoulder_pan.pos": smoothed_state[0],
-            "shoulder_lift.pos": smoothed_state[1],  
-            "elbow_flex.pos": smoothed_state[2],  
-            "wrist_flex.pos": smoothed_state[3],
-            "wrist_roll.pos": smoothed_state[4],
-            "gripper.pos": smoothed_state[5]
+            "shoulder_pan.pos": new_state[0],
+            "shoulder_lift.pos": new_state[1],  
+            "elbow_flex.pos": new_state[2],  
+            "wrist_flex.pos": new_state[3],
+            "wrist_roll.pos": new_state[4],
+            "gripper.pos": new_state[5]
         }
         self.robot.send_action(state_dict)
 
