@@ -2,7 +2,7 @@ import cv2
 
 def check_available_cameras():
     available_cameras = []
-    for i in range(10):  # Check first 10 indices
+    for i in range(15):  # Check first 10 indices
         cap = cv2.VideoCapture(i)
         if cap.isOpened():
             available_cameras.append(i)
@@ -19,7 +19,7 @@ def main():
     print(f"Available cameras: {available_cameras}")
     
 
-    cap = cv2.VideoCapture(8)
+    cap = cv2.VideoCapture(13)
     
     # Check if the camera opened successfully
     if not cap.isOpened():

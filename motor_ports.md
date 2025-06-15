@@ -32,13 +32,12 @@ sudo udevadm control --reload && sudo udevadm trigger
 
 
 
-camera right = 2
+camera right = 13
 
 
-camera left = 0
+camera left = 3
 
-camera3 - real = 8
-
+camera3 - real = 10
 
 
 sudo chmod 666 /dev/tty_follower_arm /dev/tty_leader_arm

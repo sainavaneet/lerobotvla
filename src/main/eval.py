@@ -40,19 +40,28 @@ class SO100Robot:
         self.enable_camera = enable_camera
         self.cam_main_idx = cam_main_idx
         self.robot_is_connected = False
+        self.image_thread = None
+        self.stop_image_thread = threading.Event()
+        self.latest_images = None
+        self.image_lock = threading.Lock()
         
         # Initialize cameras directly with OpenCV
         if not enable_camera:
             self.config.cameras = {}
         else:
-            self.main_camera = cv2.VideoCapture(cam_main_idx)
-            # Set camera properties
-            self.main_camera.set(cv2.CAP_PROP_FPS, 30)
-            self.main_camera.set(cv2.CAP_PROP_FRAME_WIDTH, img_width)
-            self.main_camera.set(cv2.CAP_PROP_FRAME_HEIGHT, img_height)
+            # Initialize all three cameras
+            self.right_camera = cv2.VideoCapture(13)  # Right camera
+            self.left_camera = cv2.VideoCapture(3)   # Left camera
+            self.down_camera = cv2.VideoCapture(10)   # Down camera
+            
+            # Set camera properties for all cameras
+            for camera in [self.right_camera, self.left_camera, self.down_camera]:
+                camera.set(cv2.CAP_PROP_FPS, 30)
+                camera.set(cv2.CAP_PROP_FRAME_WIDTH, img_width)
+                camera.set(cv2.CAP_PROP_FRAME_HEIGHT, img_height)
             
         self.config.leader_arms = {}
-        print("Camera initialized:", self.enable_camera)
+        print("Cameras initialized:", self.enable_camera)
 
         # remove the .cache/calibration/so100 folder
         if self.calibrate:
@@ -75,13 +84,58 @@ class SO100Robot:
         finally:
             self.disconnect()
 
+    def _image_capture_thread(self):
+        while not self.stop_image_thread.is_set():
+            try:
+                if not self.enable_camera:
+                    continue
+                    
+                # Get images from all three cameras
+                ret_right, img_right = self.right_camera.read()
+                ret_left, img_left = self.left_camera.read()
+                ret_down, img_down = self.down_camera.read()
+                
+                if all([ret_right, ret_left, ret_down]):
+                    with self.image_lock:
+                        self.latest_images = {
+                            'right': img_right,
+                            'left': img_left,
+                            'down': img_down
+                        }
+                time.sleep(0.01)  # Small delay to prevent CPU overuse
+            except Exception as e:
+                print(f"Error in image capture thread: {e}")
+                time.sleep(0.1)  # Longer delay on error
+
+    def start_image_capture(self):
+        if self.enable_camera and (self.image_thread is None or not self.image_thread.is_alive()):
+            self.stop_image_thread.clear()
+            self.image_thread = threading.Thread(target=self._image_capture_thread)
+            self.image_thread.daemon = True
+            self.image_thread.start()
+
+    def stop_image_capture(self):
+        if self.image_thread and self.image_thread.is_alive():
+            self.stop_image_thread.set()
+            self.image_thread.join()
+
+    def get_current_img(self):
+        if not self.enable_camera:
+            return None
+            
+        with self.image_lock:
+            if self.latest_images is None:
+                return None
+            return self.latest_images.copy()
+
     def connect(self):
         self.robot.connect()
 
         if self.enable_camera:
-            if not self.main_camera.isOpened():
-                raise DeviceNotConnectedError("Failed to open camera")
-            print("================> SO101 Robot is fully connected with camera =================")
+            if not self.right_camera.isOpened() or not self.left_camera.isOpened() or not self.down_camera.isOpened():
+                raise DeviceNotConnectedError("Failed to open one or more cameras")
+            self.start_image_capture()
+            print("================> SO101 Robot is fully connected with cameras =================")
         else:
             print("================> SO101 Robot is fully connected =================")
 
@@ -116,23 +170,11 @@ class SO100Robot:
         print("state", state)
         return state
 
-    def get_current_img(self):
-        if not self.enable_camera:
-            return None
-            
-        ret, img = self.main_camera.read()
-        cv2.imwrite(f"eval_images/img_{image_count}.png", img)
-        
-        if not ret:
-            raise RuntimeError("Failed to capture image from camera")
-            
-        return img
-
     def set_target_state(self, target_state: torch.Tensor):
-        print("setting target state", target_state)
-        print("target_state type", type(target_state))
+        # print("setting target state", target_state)
+        # print("target_state type", type(target_state))
         new_state = torch.tensor(target_state)
-        print("new_state type", type(new_state))
+        # print("new_state type", type(new_state))
 
 
         state_dict = {
@@ -146,8 +188,11 @@ class SO100Robot:
         self.robot.send_action(state_dict)
 
     def disconnect(self):
+        self.stop_image_capture()
         if self.enable_camera:
-            self.main_camera.release()
+            self.right_camera.release()
+            self.left_camera.release()
+            self.down_camera.release()
         
         self.robot.disconnect()
 
@@ -163,11 +208,11 @@ class SO100Robot:
 class Gr00tRobotInferenceClient:
     def __init__(
         self,
-        host="192.168.0.145",
-        port=5555,
-        language_instruction="take eraser",
-        img_width=224,
-        img_height=224,
+        host,
+        port,
+        language_instruction,
+        img_width,
+        img_height
     ):
         self.language_instruction = language_instruction
         self.img_size = (img_height, img_width)
@@ -176,10 +221,12 @@ class Gr00tRobotInferenceClient:
         self.inference_thread = None
         self.stop_thread = threading.Event()
 
-    def _inference_worker(self, img, state):
+    def _inference_worker(self, imgs, state):
         try:
             obs_dict = {
-                "video.front": cv2.cvtColor(img, cv2.COLOR_BGR2RGB)[np.newaxis, :, :, :],
+                "video.right_cam": imgs['right'][np.newaxis, :, :, :],
+                "video.left_cam": imgs['left'][np.newaxis, :, :, :],
+                "video.down_cam": imgs['down'][np.newaxis, :, :, :],
                 "state.joints": state[np.newaxis, :].astype(np.float64),
                 "annotation.task_index": [self.language_instruction],
             }
@@ -189,7 +236,7 @@ class Gr00tRobotInferenceClient:
             print(f"Error in inference thread: {e}")
             self.action_queue.put(None)
 
-    def get_action(self, img, state):
+    def get_action(self, imgs, state):
         # Stop any existing thread
         if self.inference_thread and self.inference_thread.is_alive():
             self.stop_thread.set()
@@ -199,7 +246,7 @@ class Gr00tRobotInferenceClient:
         # Start new inference thread
         self.inference_thread = threading.Thread(
             target=self._inference_worker,
-            args=(img, state)
+            args=(imgs, state)
         )
         self.inference_thread.start()
         
@@ -216,7 +263,9 @@ class Gr00tRobotInferenceClient:
 
     def sample_action(self):
         obs_dict = {
-            "video.front": np.zeros((1, self.img_size[0], self.img_size[1], 3), dtype=np.uint8),
+            "video.right_cam": np.zeros((1, self.img_size[0], self.img_size[1], 3), dtype=np.uint8),
+            "video.left_cam": np.zeros((1, self.img_size[0], self.img_size[1], 3), dtype=np.uint8),
+            "video.down_cam": np.zeros((1, self.img_size[0], self.img_size[1], 3), dtype=np.uint8),
             "state.joints": np.zeros((1, 5)),
             "annotation.task_index": [self.language_instruction],
         }
@@ -238,23 +287,40 @@ def convert_to_degrees(normalized_action):
 #################################################################################
 
 
-def view_img(img):
+def view_img(imgs):
     """
     This is a matplotlib viewer since cv2.imshow can be flaky in lerobot env
     """
-    plt.clf()  # Clear the current figure
+    plt.close('all')  # Close all existing figures
+    
+    # Create a 1x3 subplot layout
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+    
+    # Display each camera view
+    ax1.imshow(imgs['right'])
+    ax1.set_title('Right Camera')
+    ax1.axis("off")
+    
+    ax2.imshow(imgs['left'])
+    ax2.set_title('Left Camera')
+    ax2.axis("off")
+    
+    ax3.imshow(imgs['down'])
+    ax3.set_title('Down Camera')
+    ax3.axis("off")
+    
+    plt.tight_layout()
+    plt.pause(0.1)  
 
-    # Remove batch dimension if present
-    if len(img.shape) == 4:
-        img = img.squeeze(0)
 
-    if img.shape[0] == 3:
-        img = img.transpose(1, 2, 0)
+def view_img_cv2(imgs):
 
-    plt.imshow(img)
-    plt.title('Main Camera')
-    plt.axis("off")
-    plt.pause(0.01)  # Non-blocking show
+    
+    # Display each camera view
+    cv2.imwrite('Right Camera.png', imgs['right'])
+    cv2.imwrite('Left Camera.png', imgs['left'])
+    cv2.imwrite('Down Camera.png', imgs['down'])
+
 
 
 #################################################################################
@@ -272,7 +338,7 @@ if __name__ == "__main__":
         "--use_policy", action="store_true"
     )  # default is to playback the provided dataset
     parser.add_argument("--dataset_path", type=str, default=default_dataset_path)
-    parser.add_argument("--host", type=str, default="192.168.0.145")
+    parser.add_argument("--host", type=str, default="155.230.134.196")
     parser.add_argument("--port", type=int, default=5555)
     parser.add_argument("--action_horizon", type=int, default=16)
     parser.add_argument("--actions_to_execute", type=int, default=500)
@@ -286,7 +352,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Create figure for visualization
-    plt.figure(figsize=(8, 4))
+    plt.figure(figsize=(15, 5))
     
     # print lang_instruction
     print("lang_instruction: ", args.lang_instruction)
@@ -302,6 +368,8 @@ if __name__ == "__main__":
             host=args.host,
             port=args.port,
             language_instruction=args.lang_instruction,
+            img_width=args.img_width,
+            img_height=args.img_height,
         )
 
         try:
@@ -311,20 +379,28 @@ if __name__ == "__main__":
                     os.remove(os.path.join("eval_images", file))
         
             robot = SO100Robot(img_width=args.img_width, img_height=args.img_height, calibrate=False, enable_camera=True, cam_main_idx=args.cam_main_idx)
-            image_count = 0
+            robot.image_count = 0
             with robot.activate():
                 for i in tqdm(range(ACTIONS_TO_EXECUTE), desc="Executing actions"):
                     if first_time:
-                        for j in tqdm(range(50), desc="Initializing camera"):
-                            img = robot.get_current_img()
+                        for j in tqdm(range(50), desc="Initializing cameras"):
+                            imgs = robot.get_current_img()
+                            time.sleep(0.05)
                         first_time = False
-                    img = robot.get_current_img()
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    # view_img(img)
+                    
+                    imgs = robot.get_current_img()
+                    # Convert BGR to RGB for all images
+                    # imgs = {k: cv2.cvtColor(v, cv2.COLOR_BGR2RGB) for k, v in imgs.items()}
+                    # view_img(imgs)
 
                     state = robot.get_current_state()
+                    imgs['right'] = cv2.cvtColor(imgs['right'], cv2.COLOR_BGR2RGB)
+                    imgs['left'] = cv2.cvtColor(imgs['left'], cv2.COLOR_BGR2RGB)
+                    imgs['down'] = cv2.cvtColor(imgs['down'], cv2.COLOR_BGR2RGB)
+                    # view_img_cv2(imgs)
+
                     
-                    action = client.get_action(img, state)
+                    action = client.get_action(imgs, state) 
                     
                     start_time = time.time()
                     for i in range(ACTION_HORIZON):
@@ -338,6 +414,7 @@ if __name__ == "__main__":
                         time.sleep(0.02)
                         print("executing action", i, "time taken", time.time() - start_time)
                     print("Action chunk execution time taken", time.time() - start_time)
+                    robot.image_count += 1
         finally:
             client.cleanup()
     else:
