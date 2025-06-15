@@ -19,11 +19,7 @@ from lerobot.common.robots import (  # noqa: F401
     so101_follower,
 )
 from lerobot.common.errors import DeviceNotConnectedError, DeviceAlreadyConnectedError, InvalidActionError
-import pandas as pd
-import os
-import sys  
-sys.path.append(os.path.expanduser("~/lerobotvla/src/"))
-
+from src.main.publish_trajectory import publish_trajectory
 # NOTE:
 # Sometimes we would like to abstract different env, or run this on a separate machine
 # User can just move this single python class method gr00t/eval/service.py
@@ -145,6 +141,16 @@ class SO100Robot:
         else:
             print("================> SO101 Robot is fully connected =================")
 
+    # def go_home(self):
+    #     # [ 88.0664, 156.7090, 135.6152,  83.7598, -89.1211,  16.5107]
+    #     print("-------------------------------- moving to home pose")
+
+    #     # state [-0.11618123 -1.72656227  1.73625868  0.34490323  0.05362618  0.0602237 ]
+    #     home_state_radians = np.array([-0.11618123, -1.72656227, 1.73625868, 0.34490323, 0.05362618, 0.0602237])
+    #     home_state = torch.tensor(np.degrees(home_state_radians))
+    #     print("home_state", home_state)
+    #     self.set_target_state(home_state)
+    #     time.sleep(2)
 
     def get_observation(self):
         obs = self.robot.get_observation()
@@ -217,7 +223,7 @@ class Gr00tRobotInferenceClient:
         self.inference_thread = None
         self.stop_thread = threading.Event()
 
-        self.safe_positions = [-12.69584009, -94.55220801, 97.34929457, 56.34344297, -0.09770396, 32.28092784]
+        self.safe_positions = [-23.06861114501953,-99.17457580566406,98.46088409423828,43.69927215576172,5.862237453460693,1.9329897165298462]
 
     def _inference_worker(self, imgs, state):
         try:
@@ -272,14 +278,12 @@ class Gr00tRobotInferenceClient:
     def set_lang_instruction(self, lang_instruction):
         self.language_instruction = lang_instruction
 
-    def check_safe_pose(self, current_state, tolerance=8.0):
-
-        return all(abs(current - target) <= tolerance 
-                  for current, target in zip(current_state, self.safe_positions))
-
 
 def convert_to_degrees(normalized_action):
-
+    """
+    Convert normalized actions to degrees.
+    The normalized actions are typically in range [-1, 1] and need to be scaled to the robot's joint ranges.
+    """
     # Joint limits in degrees for SO101 robot
     return np.degrees(normalized_action)
 
@@ -320,49 +324,10 @@ def view_img_cv2(imgs):
     cv2.imwrite('Right Camera.png', imgs['right'])
     cv2.imwrite('Left Camera.png', imgs['left'])
     cv2.imwrite('Down Camera.png', imgs['down'])
-def execute_trajectory(robot, trajectory_df, delay=0.02):
-
-    print("Starting trajectory execution...")
-    
-    try:
-        # Execute trajectory
-        for idx, row in tqdm(trajectory_df.iterrows(), total=len(trajectory_df), desc="Executing trajectory"):
-            # Get state from the observation.state column
-            state = np.array(row['observation.state'])
-            
-            # Set target state for the robot
-            robot.set_target_state(state)
-            time.sleep(delay)
-            
-        # Add a final delay to allow motors to settle
-        time.sleep(1.0)
-    except Exception as e:
-        print(f"Error during trajectory execution: {e}")
-        raise
-
-def load_trajectory(parquet_file):
-    """
-    Load trajectory data from a parquet file.
-    Expected columns: observation.state (as a list/array)
-    """
-    df = pd.read_parquet(parquet_file)
-    return df
 
 
-def publish_trajectory(robot):
-    # Hardcoded values
-    trajectory_file = "/home/navaneet/lerobotvla/datasets/traj/data/chunk-000/episode_000000.parquet"
-    delay = 0.02
 
-    try:
-        # Load trajectory
-        print(f"Loading trajectory from {trajectory_file}")
-        trajectory_df = load_trajectory(trajectory_file)
-        
-        execute_trajectory(robot, trajectory_df, delay)
-            
-    except Exception as e:
-        print(f"Error occurred: {e}")
+#################################################################################
 
 if __name__ == "__main__":
     import argparse
@@ -418,16 +383,14 @@ if __name__ == "__main__":
                     os.remove(os.path.join("eval_images", file))
         
             robot = SO100Robot(img_width=args.img_width, img_height=args.img_height, calibrate=False, enable_camera=True, cam_main_idx=args.cam_main_idx)
-            robot.step_count = 0
+            robot.image_count = 0
             with robot.activate():
-                # robot.robot.send_action(robot.robot.initial_pose)
                 for i in tqdm(range(ACTIONS_TO_EXECUTE), desc="Executing actions"):
                     if first_time:
                         for j in tqdm(range(50), desc="Initializing cameras"):
                             imgs = robot.get_current_img()
                             time.sleep(0.05)
                         first_time = False
-                
                     
                     imgs = robot.get_current_img()
                     # Convert BGR to RGB for all images
@@ -453,23 +416,9 @@ if __name__ == "__main__":
 
                         robot.set_target_state(concat_action) 
                         time.sleep(0.02)
-                    #     print("executing action", i, "time taken", time.time() - start_time)
-                    # print("Action chunk execution time taken", time.time() - start_time)
-                    robot.step_count += 1
-                    
-                    # Check safe pose every 50 steps
-                    if robot.step_count % 30 == 0:
-                        current_state = robot.get_current_state()
-                        if client.check_safe_pose(current_state):
-                            print("Robot has reached safe pose! Executing publish_trajectory...")
-                            # Execute publish_trajectory
-                            publish_trajectory(robot)
-                            print("Trajectory published successfully")
-                            # Break out of the policy loop
-                            break
-                        else:
-                            print("Robot is not in safe pose. Current state:", current_state)
-                            print("Target safe pose:", client.safe_positions)
+                        print("executing action", i, "time taken", time.time() - start_time)
+                    print("Action chunk execution time taken", time.time() - start_time)
+                    robot.image_count += 1
         finally:
             client.cleanup()
     else:

@@ -37,7 +37,7 @@ camera right = 2
 
 camera left = 0
 
-camera3 - real = 10
+camera3 - real = 8
 
 
 sudo chmod 666 /dev/tty_follower_arm /dev/tty_leader_arm

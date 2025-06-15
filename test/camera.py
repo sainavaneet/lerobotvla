@@ -19,7 +19,7 @@ def main():
     print(f"Available cameras: {available_cameras}")
     
 
-    cap = cv2.VideoCapture(8)
+    cap = cv2.VideoCapture(0)
     
     # Check if the camera opened successfully
     if not cap.isOpened():
