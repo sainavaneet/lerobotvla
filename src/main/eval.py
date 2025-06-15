@@ -50,9 +50,9 @@ class SO100Robot:
             self.config.cameras = {}
         else:
             # Initialize all three cameras
-            self.right_camera = cv2.VideoCapture(13)  # Right camera
-            self.left_camera = cv2.VideoCapture(3)   # Left camera
-            self.down_camera = cv2.VideoCapture(10)   # Down camera
+            self.right_camera = cv2.VideoCapture(2)  # Right camera
+            self.left_camera = cv2.VideoCapture(0)   # Left camera
+            self.down_camera = cv2.VideoCapture(8)   # Down camera
             
             # Set camera properties for all cameras
             for camera in [self.right_camera, self.left_camera, self.down_camera]:
@@ -394,10 +394,10 @@ if __name__ == "__main__":
                     # view_img(imgs)
 
                     state = robot.get_current_state()
-                    imgs['right'] = cv2.cvtColor(imgs['right'], cv2.COLOR_RGB2BGR)
-                    imgs['left'] = cv2.cvtColor(imgs['left'], cv2.COLOR_RGB2BGR)
-                    imgs['down'] = cv2.cvtColor(imgs['down'], cv2.COLOR_RGB2BGR)
-                    # view_img_cv2(imgs)
+                    imgs['right'] = cv2.cvtColor(imgs['right'], cv2.COLOR_BGR2RGB)
+                    imgs['left'] = cv2.cvtColor(imgs['left'], cv2.COLOR_BGR2RGB)
+                    imgs['down'] = cv2.cvtColor(imgs['down'], cv2.COLOR_BGR2RGB)
+                    view_img_cv2(imgs)
 
                     
                     action = client.get_action(imgs, state) 

@@ -32,10 +32,10 @@ sudo udevadm control --reload && sudo udevadm trigger
 
 
 
-camera right = 13
+camera right = 2
 
 
-camera left = 3
+camera left = 0
 
 camera3 - real = 10
 
