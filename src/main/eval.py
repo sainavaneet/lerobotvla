@@ -394,9 +394,9 @@ if __name__ == "__main__":
                     # view_img(imgs)
 
                     state = robot.get_current_state()
-                    imgs['right'] = cv2.cvtColor(imgs['right'], cv2.COLOR_BGR2RGB)
-                    imgs['left'] = cv2.cvtColor(imgs['left'], cv2.COLOR_BGR2RGB)
-                    imgs['down'] = cv2.cvtColor(imgs['down'], cv2.COLOR_BGR2RGB)
+                    imgs['right'] = cv2.cvtColor(imgs['right'], cv2.COLOR_RGB2BGR)
+                    imgs['left'] = cv2.cvtColor(imgs['left'], cv2.COLOR_RGB2BGR)
+                    imgs['down'] = cv2.cvtColor(imgs['down'], cv2.COLOR_RGB2BGR)
                     # view_img_cv2(imgs)
 
                     

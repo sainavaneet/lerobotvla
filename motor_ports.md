@@ -41,3 +41,17 @@ camera3 - real = 10
 
 
 sudo chmod 666 /dev/tty_follower_arm /dev/tty_leader_arm
+
+
+mint - yellow
+
+
+yellow - mint
+
+red - mint
+
+
+
+
+
+
